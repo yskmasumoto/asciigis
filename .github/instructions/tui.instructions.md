@@ -38,3 +38,4 @@ var (
         Background(lipgloss.Color("#25A065")).
         Padding(0, 1)
 )
+```
