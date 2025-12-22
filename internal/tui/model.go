@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"asciigis/internal/geo"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -43,6 +44,8 @@ type geometryLoadedMsg struct {
 
 type model struct {
 	geoPath   string
+	inputPath string
+	editing   bool
 	geometry  geo.TuiGeometry
 	width     int
 	height    int
@@ -55,7 +58,14 @@ type model struct {
 
 // NewModel creates a Bubble Tea model configured with a GeoJSON path.
 func NewModel(geoPath string) model {
-	return model{geoPath: geoPath}
+	m := model{geoPath: geoPath}
+	if strings.TrimSpace(geoPath) == "" {
+		m.editing = true
+		m.inputPath = ""
+	} else {
+		m.inputPath = geoPath
+	}
+	return m
 }
 
 // Run launches the TUI.
@@ -76,8 +86,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mapWidth = maxInt(msg.Width-8, minMapWidth)
 		m.mapHeight = maxInt(msg.Height-8, minMapHeight)
 		m.ready = true
-		m.loading = true
-		return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+		if strings.TrimSpace(m.geoPath) != "" {
+			m.loading = true
+			return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+		}
+		m.loading = false
+		return m, nil
 
 	case geometryLoadedMsg:
 		m.loading = false
@@ -91,14 +105,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Path input mode.
+		if m.editing {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				// If we already have a loaded path, allow canceling back to view mode.
+				if strings.TrimSpace(m.geoPath) != "" {
+					m.editing = false
+					m.inputPath = m.geoPath
+					return m, nil
+				}
+				// Otherwise stay in editing mode.
+				return m, nil
+			case "enter":
+				p := strings.TrimSpace(m.inputPath)
+				if p == "" {
+					m.err = fmt.Errorf("path is empty")
+					return m, nil
+				}
+				m.geoPath = p
+				m.inputPath = p
+				m.editing = false
+				m.loading = true
+				m.err = nil
+				m.geometry = geo.TuiGeometry{}
+				if m.ready {
+					return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+				}
+				return m, nil
+			case "backspace", "ctrl+h":
+				m.inputPath = dropLastRune(m.inputPath)
+				return m, nil
+			case "ctrl+u":
+				m.inputPath = ""
+				return m, nil
+			}
+
+			if msg.Type == tea.KeyRunes {
+				m.inputPath += string(msg.Runes)
+				return m, nil
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "r":
-			if m.ready {
+			if m.ready && strings.TrimSpace(m.geoPath) != "" {
 				m.loading = true
 				return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
 			}
+		case "/", "p":
+			m.editing = true
+			if strings.TrimSpace(m.geoPath) != "" {
+				m.inputPath = m.geoPath
+			}
+			return m, nil
 		}
 	}
 	return m, nil
@@ -109,43 +174,68 @@ func (m model) View() string {
 		return "Calculating viewport..."
 	}
 
-	if m.err != nil {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			titleStyle.Render("asciigis viewer"),
-			infoStyle.Render(fmt.Sprintf("Failed to load: %v", m.err)),
-			helpStyle.Render("q: quit"),
-		)
+	mapBlock := mapStyle.Width(m.mapWidth).Render(renderCanvas(m.geometry, m.loading, m.err))
+
+	pathPanel := ""
+	if m.editing {
+		input := m.inputPath
+		// simple caret
+		input = input + "_"
+		pathPanel = infoStyle.Render(strings.Join([]string{
+			"Enter GeoJSON path:",
+			input,
+			"Enter: load | Esc: cancel | Ctrl+U: clear",
+		}, "\n"))
 	}
 
-	mapBlock := mapStyle.Width(m.geometry.Width + 2).Render(renderCanvas(m.geometry))
-
-	info := infoStyle.Render(strings.Join([]string{
-		fmt.Sprintf("File: %s", m.geoPath),
-		fmt.Sprintf("Bounds: lon %.4f .. %.4f | lat %.4f .. %.4f", m.geometry.Bounds.LonMin, m.geometry.Bounds.LonMax, m.geometry.Bounds.LatMin, m.geometry.Bounds.LatMax),
-		fmt.Sprintf("Canvas: %dx%d", m.geometry.Width, m.geometry.Height),
-		fmt.Sprintf("Polygons: %d", len(m.geometry.Polygons)),
-	}, "\n"))
+	infoLines := []string{fmt.Sprintf("File: %s", emptyWhen(strings.TrimSpace(m.geoPath), "(none)"))}
+	if m.geometry.Width > 0 && m.geometry.Height > 0 && m.err == nil {
+		infoLines = append(infoLines,
+			fmt.Sprintf("Bounds: lon %.4f .. %.4f | lat %.4f .. %.4f", m.geometry.Bounds.LonMin, m.geometry.Bounds.LonMax, m.geometry.Bounds.LatMin, m.geometry.Bounds.LatMax),
+			fmt.Sprintf("Canvas: %dx%d", m.geometry.Width, m.geometry.Height),
+			fmt.Sprintf("Polygons: %d", len(m.geometry.Polygons)),
+		)
+	}
+	if m.err != nil {
+		infoLines = append(infoLines, fmt.Sprintf("Error: %v", m.err))
+	}
+	info := infoStyle.Render(strings.Join(infoLines, "\n"))
 
 	statusText := "Loaded"
 	if m.loading {
 		statusText = "Loading..."
 	}
 
-	footer := helpStyle.Render(fmt.Sprintf("q: quit | r: reload | %s", statusText))
+	footerText := fmt.Sprintf("q: quit | r: reload | / or p: set path | %s", statusText)
+	if m.editing {
+		footerText = "q: quit | typing..."
+	}
+	footer := helpStyle.Render(footerText)
+
+	parts := []string{
+		titleStyle.Render("asciigis viewer"),
+		mapBlock,
+	}
+	if m.editing {
+		parts = append(parts, pathPanel)
+	}
+	parts = append(parts, info, footer)
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render("asciigis viewer"),
-		mapBlock,
-		info,
-		footer,
+		parts...,
 	)
 }
 
-func renderCanvas(geometry geo.TuiGeometry) string {
+func renderCanvas(geometry geo.TuiGeometry, loading bool, loadErr error) string {
+	if loading {
+		return "Loading..."
+	}
+	if loadErr != nil {
+		return fmt.Sprintf("Failed to load: %v", loadErr)
+	}
 	if geometry.Width == 0 || geometry.Height == 0 {
-		return "No geometry yet"
+		return "No geometry yet (press '/' to set path)"
 	}
 
 	canvas := make([][]rune, geometry.Height)
@@ -181,6 +271,24 @@ func loadGeometryCmd(path string, width, height int) tea.Cmd {
 		geometry, err := geo.ConvertTui(path, width, height)
 		return geometryLoadedMsg{geometry: geometry, err: err}
 	}
+}
+
+func dropLastRune(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if len(r) == 0 {
+		return ""
+	}
+	return string(r[:len(r)-1])
+}
+
+func emptyWhen(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func maxInt(a, b int) int {
