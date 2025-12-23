@@ -1,5 +1,5 @@
 ---
-applyTo: **/internal/tui/**/*.go
+applyTo: "**/internal/tui/**/*.go"
 ---
 
 # tui.instruction.md
