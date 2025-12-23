@@ -1,5 +1,5 @@
 ---
-applyTo: **/*.go
+applyTo: "**/*.go"
 excludeAgent: ["coding-agent"]
 ---
 
