@@ -43,7 +43,7 @@ func geometoryToTui(lon, lat float64, bound *Bound, width, height int) [2]int {
 	if bound.lonSpan() > 0 {
 		xNorm = (lon - bound.LonMin) / bound.lonSpan() * float64(width-1)
 	} else {
-		xNorm = 0
+		xNorm = float64(width-1) / 2
 	}
 	x := int(math.Round(xNorm))
 
@@ -51,7 +51,7 @@ func geometoryToTui(lon, lat float64, bound *Bound, width, height int) [2]int {
 	if bound.latSpan() > 0 {
 		yNorm = (bound.LatMax - lat) / bound.latSpan() * float64(height-1)
 	} else {
-		yNorm = 0
+		yNorm = float64(height-1) / 2
 	}
 	y := int(math.Round(yNorm))
 

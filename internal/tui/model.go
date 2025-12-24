@@ -42,23 +42,35 @@ type geometryLoadedMsg struct {
 	err      error
 }
 
+// Options configures the TUI behavior.
+// MapWidth/MapHeight, when > 0, request a fixed canvas size.
+// The final size may be clamped to the current terminal size.
+type Options struct {
+	MapWidth  int
+	MapHeight int
+}
+
 type model struct {
-	geoPath   string
-	inputPath string
-	editing   bool
-	geometry  geo.TuiGeometry
-	width     int
-	height    int
-	mapWidth  int
-	mapHeight int
-	ready     bool
-	loading   bool
-	err       error
+	geoPath        string
+	inputPath      string
+	editing        bool
+	geometry       geo.TuiGeometry
+	width          int
+	height         int
+	mapWidth       int
+	mapHeight      int
+	maxMapWidth    int
+	maxMapHeight   int
+	fixedMapWidth  int
+	fixedMapHeight int
+	ready          bool
+	loading        bool
+	err            error
 }
 
 // NewModel creates a Bubble Tea model configured with a GeoJSON path.
-func NewModel(geoPath string) model {
-	m := model{geoPath: geoPath}
+func NewModel(geoPath string, opts Options) model {
+	m := model{geoPath: geoPath, fixedMapWidth: opts.MapWidth, fixedMapHeight: opts.MapHeight}
 	if strings.TrimSpace(geoPath) == "" {
 		m.editing = true
 		m.inputPath = ""
@@ -70,7 +82,12 @@ func NewModel(geoPath string) model {
 
 // Run launches the TUI.
 func Run(geoPath string) error {
-	_, err := tea.NewProgram(NewModel(geoPath), tea.WithAltScreen()).Run()
+	return RunWithOptions(geoPath, Options{})
+}
+
+// RunWithOptions launches the TUI with additional configuration.
+func RunWithOptions(geoPath string, opts Options) error {
+	_, err := tea.NewProgram(NewModel(geoPath, opts), tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -81,12 +98,27 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		prevW, prevH := m.mapWidth, m.mapHeight
 		m.width = msg.Width
 		m.height = msg.Height
-		m.mapWidth = maxInt(msg.Width-8, minMapWidth)
-		m.mapHeight = maxInt(msg.Height-8, minMapHeight)
+		computedMapWidth := maxInt(msg.Width-8, minMapWidth)
+		computedMapHeight := maxInt(msg.Height-8, minMapHeight)
+		m.maxMapWidth = computedMapWidth
+		m.maxMapHeight = computedMapHeight
+
+		desiredW := computedMapWidth
+		desiredH := computedMapHeight
+
+		if m.fixedMapWidth > 0 {
+			desiredW = maxInt(minInt(m.fixedMapWidth, computedMapWidth), minMapWidth)
+		}
+		if m.fixedMapHeight > 0 {
+			desiredH = maxInt(minInt(m.fixedMapHeight, computedMapHeight), minMapHeight)
+		}
+		m.mapWidth = desiredW
+		m.mapHeight = desiredH
 		m.ready = true
-		if strings.TrimSpace(m.geoPath) != "" {
+		if strings.TrimSpace(m.geoPath) != "" && (prevW != m.mapWidth || prevH != m.mapHeight || m.geometry.Width == 0 || m.geometry.Height == 0) {
 			m.loading = true
 			return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
 		}
@@ -158,6 +190,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
 			}
+		case "a":
+			return m.resizeCanvas(-1, 0)
+		case "d":
+			return m.resizeCanvas(1, 0)
+		case "w":
+			return m.resizeCanvas(0, 1)
+		case "s":
+			return m.resizeCanvas(0, -1)
 		case "/", "p":
 			m.editing = true
 			if strings.TrimSpace(m.geoPath) != "" {
@@ -206,7 +246,7 @@ func (m model) View() string {
 		statusText = "Loading..."
 	}
 
-	footerText := fmt.Sprintf("q: quit | r: reload | / or p: set path | %s", statusText)
+	footerText := fmt.Sprintf("q: quit | r: reload | a/d: width -/+ | w/s: height +/- | / or p: set path | %s", statusText)
 	if m.editing {
 		footerText = "q: quit | typing..."
 	}
@@ -296,4 +336,56 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func (m model) resizeCanvas(deltaW, deltaH int) (tea.Model, tea.Cmd) {
+	if !m.ready {
+		return m, nil
+	}
+	if strings.TrimSpace(m.geoPath) == "" {
+		return m, nil
+	}
+
+	maxW := m.maxMapWidth
+	maxH := m.maxMapHeight
+	if maxW <= 0 {
+		maxW = maxInt(m.mapWidth, minMapWidth)
+	}
+	if maxH <= 0 {
+		maxH = maxInt(m.mapHeight, minMapHeight)
+	}
+
+	newW := clampInt(m.mapWidth+deltaW, minMapWidth, maxW)
+	newH := clampInt(m.mapHeight+deltaH, minMapHeight, maxH)
+	if newW == m.mapWidth && newH == m.mapHeight {
+		return m, nil
+	}
+
+	m.mapWidth = newW
+	m.mapHeight = newH
+	// Persist user choice across WindowSizeMsg.
+	m.fixedMapWidth = newW
+	m.fixedMapHeight = newH
+
+	m.loading = true
+	m.err = nil
+	m.geometry = geo.TuiGeometry{}
+	return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
 }
