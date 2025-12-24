@@ -54,6 +54,10 @@ func extractCoordinates(geometry map[string]interface{}) [][][2]float64 {
 
 	// ジオメトリタイプに応じた座標の抽出
 	switch geomType {
+	case "Point":
+		if lon, lat, ok := toCoordinatePair(coordsSlice); ok {
+			return [][][2]float64{{{lon, lat}}}
+		}
 	case "Polygon":
 		if ring, ok := parseRing(coordsSlice[0]); ok {
 			return [][][2]float64{ring}
