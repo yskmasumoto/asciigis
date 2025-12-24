@@ -18,7 +18,7 @@ go run ./cmd/asciigis
 
 - `q` / `Ctrl+C`: quit
 - `r`: reload
-- `a` / `d`: canvas width -/+ 
+- `a` / `d`: canvas width -/+
 - `w` / `s`: canvas height +/-
 - `/` or `p`: set GeoJSON path
 - (path input) `Enter`: load, `Esc`: cancel, `Ctrl+U`: clear
