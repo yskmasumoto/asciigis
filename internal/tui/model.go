@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"asciigis/internal/geo"
@@ -38,6 +39,8 @@ const (
 )
 
 type geometryLoadedMsg struct {
+	path     string
+	data     []byte
 	geometry geo.TuiGeometry
 	err      error
 }
@@ -53,6 +56,7 @@ type Options struct {
 type model struct {
 	geoPath        string
 	inputPath      string
+	geoData        []byte
 	editing        bool
 	geometry       geo.TuiGeometry
 	width          int
@@ -120,7 +124,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		if strings.TrimSpace(m.geoPath) != "" && (prevW != m.mapWidth || prevH != m.mapHeight || m.geometry.Width == 0 || m.geometry.Height == 0) {
 			m.loading = true
-			return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+			return m, loadGeometryCmd(m.geoPath, m.geoData, m.mapWidth, m.mapHeight)
 		}
 		m.loading = false
 		return m, nil
@@ -132,6 +136,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.geometry = geo.TuiGeometry{}
 			return m, nil
 		}
+		if strings.TrimSpace(msg.path) != strings.TrimSpace(m.geoPath) {
+			// Ignore stale results (path changed/cleared while loading).
+			return m, nil
+		}
+		m.geoData = msg.data
 		m.geometry = msg.geometry
 		m.err = nil
 		return m, nil
@@ -159,12 +168,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.geoPath = p
 				m.inputPath = p
+				m.geoData = nil
 				m.editing = false
 				m.loading = true
 				m.err = nil
 				m.geometry = geo.TuiGeometry{}
 				if m.ready {
-					return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+					return m, loadGeometryCmd(m.geoPath, nil, m.mapWidth, m.mapHeight)
 				}
 				return m, nil
 			case "backspace", "ctrl+h":
@@ -188,8 +198,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if m.ready && strings.TrimSpace(m.geoPath) != "" {
 				m.loading = true
-				return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+				m.geoData = nil // Clear cached data to force reload.
+				return m, loadGeometryCmd(m.geoPath, nil, m.mapWidth, m.mapHeight)
 			}
+		case "c":
+			m.geoPath = ""
+			m.inputPath = ""
+			m.geoData = nil
+			m.geometry = geo.TuiGeometry{}
+			m.err = nil
+			m.loading = false
+			m.editing = true
+			return m, nil
 		case "a":
 			return m.resizeCanvas(-1, 0)
 		case "d":
@@ -246,7 +266,7 @@ func (m model) View() string {
 		statusText = "Loading..."
 	}
 
-	footerText := fmt.Sprintf("q: quit | r: reload | a/d: width -/+ | w/s: height +/- | / or p: set path | %s", statusText)
+	footerText := fmt.Sprintf("q: quit | r: reload | c: clear | a/d: width -/+ | w/s: height +/- | / or p: set path | %s", statusText)
 	if m.editing {
 		footerText = "q: quit | typing..."
 	}
@@ -306,10 +326,27 @@ func renderCanvas(geometry geo.TuiGeometry, loading bool, loadErr error) string 
 	return strings.Join(lines, "\n")
 }
 
-func loadGeometryCmd(path string, width, height int) tea.Cmd {
+func loadGeometryCmd(path string, cached []byte, width, height int) tea.Cmd {
 	return func() tea.Msg {
-		geometry, err := geo.ConvertTui(path, width, height)
-		return geometryLoadedMsg{geometry: geometry, err: err}
+		p := strings.TrimSpace(path)
+		if p == "" {
+			return geometryLoadedMsg{path: path, err: fmt.Errorf("path is empty")}
+		}
+
+		data := cached
+		if data == nil {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return geometryLoadedMsg{path: path, err: fmt.Errorf("read file: %w", err)}
+			}
+			data = b
+		}
+
+		geometry, err := geo.ConvertTuiBytes(data, width, height)
+		if err != nil {
+			return geometryLoadedMsg{path: path, data: data, err: fmt.Errorf("convert geometry: %w", err)}
+		}
+		return geometryLoadedMsg{path: path, data: data, geometry: geometry, err: nil}
 	}
 }
 
@@ -387,5 +424,5 @@ func (m model) resizeCanvas(deltaW, deltaH int) (tea.Model, tea.Cmd) {
 	m.loading = true
 	m.err = nil
 	m.geometry = geo.TuiGeometry{}
-	return m, loadGeometryCmd(m.geoPath, m.mapWidth, m.mapHeight)
+	return m, loadGeometryCmd(m.geoPath, m.geoData, m.mapWidth, m.mapHeight)
 }

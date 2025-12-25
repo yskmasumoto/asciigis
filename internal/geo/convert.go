@@ -90,6 +90,27 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 	if err != nil {
 		return TuiGeometry{}, fmt.Errorf("read file: %w", err)
 	}
+	return ConvertTuiBytes(data, width, height)
+}
+
+/*
+ConvertTuiBytes
+GeoJSONデータ（bytes）を読み込み、地理座標をターミナルUI座標に変換する。
+
+Args:
+
+	data: GeoJSONの生データ
+	width: ターミナル幅（セル数）
+	height: ターミナル高さ（セル数）
+
+Returns:
+
+	TuiGeometry
+*/
+func ConvertTuiBytes(data []byte, width, height int) (TuiGeometry, error) {
+	if len(data) == 0 {
+		return TuiGeometry{}, errors.New("empty GeoJSON data")
+	}
 
 	// jsonのパース
 	var geojson map[string]interface{}
