@@ -198,6 +198,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if m.ready && strings.TrimSpace(m.geoPath) != "" {
 				m.loading = true
+				m.geoData = nil // Clear cached data to force reload.
 				return m, loadGeometryCmd(m.geoPath, nil, m.mapWidth, m.mapHeight)
 			}
 		case "c":
