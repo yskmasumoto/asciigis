@@ -109,7 +109,11 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 	if err != nil {
 		return TuiGeometry{}, fmt.Errorf("parse JSON: %w", err)
 	}
+	if geojson == nil {
+		return TuiGeometry{}, errors.New("geojson is nil")
+	}
 
+	// この時点でgeojsonはmap[string]interface{}型であることが保証されているので、ConvertTuiBytesを呼び出す
 	return ConvertTuiBytes(geojson, width, height)
 }
 
