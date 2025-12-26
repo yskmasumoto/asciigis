@@ -14,6 +14,11 @@ import (
 )
 
 func BytesToGeoJSON(data []byte) (map[string]interface{}, error) {
+	// データが空の場合はエラーを返す
+	if len(data) == 0 {
+		return nil, errors.New("empty GeoJSON Bytes")
+	}
+
 	// jsonのパース
 	var geojson map[string]interface{}
 	if err := json.Unmarshal(data, &geojson); err != nil {
@@ -98,10 +103,6 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return TuiGeometry{}, fmt.Errorf("read file: %w", err)
-	}
-
-	if len(data) == 0 {
-		return TuiGeometry{}, errors.New("empty GeoJSON data")
 	}
 
 	// jsonのパース
