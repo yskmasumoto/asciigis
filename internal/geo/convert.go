@@ -13,6 +13,15 @@ import (
 	"os"
 )
 
+func BytesToGeoJSON(data []byte) (map[string]interface{}, error) {
+	// jsonのパース
+	var geojson map[string]interface{}
+	if err := json.Unmarshal(data, &geojson); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+	return geojson, nil
+}
+
 /*
 地理座標（経度緯度）をターミナルUI座標（X, Y）に変換する。
 【変換ロジック】
@@ -90,7 +99,18 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 	if err != nil {
 		return TuiGeometry{}, fmt.Errorf("read file: %w", err)
 	}
-	return ConvertTuiBytes(data, width, height)
+
+	if len(data) == 0 {
+		return TuiGeometry{}, errors.New("empty GeoJSON data")
+	}
+
+	// jsonのパース
+	geojson, err := BytesToGeoJSON(data)
+	if err != nil {
+		return TuiGeometry{}, fmt.Errorf("parse JSON: %w", err)
+	}
+
+	return ConvertTuiBytes(geojson, width, height)
 }
 
 /*
@@ -99,7 +119,7 @@ GeoJSONデータ（bytes）を読み込み、地理座標をターミナルUI座
 
 Args:
 
-	data: GeoJSONの生データ
+	data: パース済みのGeoJSONデータ
 	width: ターミナル幅（セル数）
 	height: ターミナル高さ（セル数）
 
@@ -107,16 +127,7 @@ Returns:
 
 	TuiGeometry
 */
-func ConvertTuiBytes(data []byte, width, height int) (TuiGeometry, error) {
-	if len(data) == 0 {
-		return TuiGeometry{}, errors.New("empty GeoJSON data")
-	}
-
-	// jsonのパース
-	var geojson map[string]interface{}
-	if err := json.Unmarshal(data, &geojson); err != nil {
-		return TuiGeometry{}, fmt.Errorf("parse JSON: %w", err)
-	}
+func ConvertTuiBytes(geojson map[string]interface{}, width, height int) (TuiGeometry, error) {
 
 	// featuresの取得
 	featuresInterface, ok := geojson["features"]
