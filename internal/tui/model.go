@@ -40,7 +40,7 @@ const (
 
 type geometryLoadedMsg struct {
 	path     string
-	data     []byte
+	data     map[string]interface{}
 	geometry geo.TuiGeometry
 	err      error
 }
@@ -56,7 +56,7 @@ type Options struct {
 type model struct {
 	geoPath        string
 	inputPath      string
-	geoData        []byte
+	geoData        map[string]interface{}
 	editing        bool
 	geometry       geo.TuiGeometry
 	width          int
@@ -326,7 +326,7 @@ func renderCanvas(geometry geo.TuiGeometry, loading bool, loadErr error) string 
 	return strings.Join(lines, "\n")
 }
 
-func loadGeometryCmd(path string, cached []byte, width, height int) tea.Cmd {
+func loadGeometryCmd(path string, cached map[string]interface{}, width, height int) tea.Cmd {
 	return func() tea.Msg {
 		p := strings.TrimSpace(path)
 		if p == "" {
@@ -339,7 +339,10 @@ func loadGeometryCmd(path string, cached []byte, width, height int) tea.Cmd {
 			if err != nil {
 				return geometryLoadedMsg{path: path, err: fmt.Errorf("read file: %w", err)}
 			}
-			data = b
+			data, err = geo.BytesToGeoJSON(b)
+			if err != nil {
+				return geometryLoadedMsg{path: path, err: fmt.Errorf("parse JSON: %w", err)}
+			}
 		}
 
 		geometry, err := geo.ConvertTuiBytes(data, width, height)
