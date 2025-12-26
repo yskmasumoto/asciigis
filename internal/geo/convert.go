@@ -115,7 +115,7 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 
 /*
 ConvertTuiBytes
-GeoJSONデータ（bytes）を読み込み、地理座標をターミナルUI座標に変換する。
+パース済みのgeojsonデータを読み込み、地理座標をターミナルUI座標に変換する。
 
 Args:
 
