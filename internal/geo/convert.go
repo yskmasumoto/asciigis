@@ -13,18 +13,31 @@ import (
 	"os"
 )
 
-func BytesToGeoJSON(data []byte) (map[string]interface{}, error) {
+func BytesToLayer(data []byte) (Layer, error) {
 	// データが空の場合はエラーを返す
 	if len(data) == 0 {
-		return nil, errors.New("empty GeoJSON Bytes")
+		return Layer{
+			Valid: false,
+		}, errors.New("empty GeoJSON Bytes")
 	}
 
 	// jsonのパース
 	var geojson map[string]interface{}
 	if err := json.Unmarshal(data, &geojson); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w", err)
+		return Layer{
+			Valid: false,
+		}, fmt.Errorf("parse JSON: %w", err)
 	}
-	return geojson, nil
+
+	// Layer型に変換
+	layer, err := ConvertTuiLayer(geojson)
+	if err != nil {
+		return Layer{
+			Valid: false,
+		}, fmt.Errorf("convert to Layer: %w", err)
+	}
+
+	return layer, nil
 }
 
 /*
@@ -106,12 +119,12 @@ func ConvertTui(path string, width, height int) (TuiGeometry, error) {
 	}
 
 	// jsonのパース
-	geojson, err := BytesToGeoJSON(data)
+	layer, err := BytesToLayer(data)
 	if err != nil {
 		return TuiGeometry{}, fmt.Errorf("parse JSON: %w", err)
 	}
 
-	return ConvertTuiBytes(geojson, width, height)
+	return ConvertTuiBytes(layer, width, height)
 }
 
 /*
@@ -128,21 +141,70 @@ Returns:
 
 	TuiGeometry
 */
-func ConvertTuiBytes(geojson map[string]interface{}, width, height int) (TuiGeometry, error) {
+func ConvertTuiBytes(layer Layer, width, height int) (TuiGeometry, error) {
+	// 各featureの処理
+	var polygons []Polygon
+	for _, feature := range layer.Features {
+		// 各ringsの処理
+		rings := feature.Rings
+		var tuiRings [][][2]int
+		for _, ring := range rings {
+			var tuiRing [][2]int
+			for _, coord := range ring {
+				lon, lat := coord[0], coord[1]
+				tuiCoord := geometoryToTui(lon, lat, &layer.Bounds, width, height)
+				tuiRing = append(tuiRing, tuiCoord)
+			}
+			tuiRings = append(tuiRings, tuiRing)
+		}
+
+		polygon := Polygon{
+			Name:       feature.Name,
+			Properties: feature.Properties,
+			Rings:      tuiRings,
+		}
+		polygons = append(polygons, polygon)
+	}
+
+	return TuiGeometry{
+		Bounds:   layer.Bounds,
+		Width:    width,
+		Height:   height,
+		Polygons: polygons,
+	}, nil
+}
+
+// ConvertTuiLayer
+// パース済みのgeojsonデータを読み込み、地理座標をLayer型で返す。
+//
+// Args:
+//
+//	data: パース済みのGeoJSONデータ
+//
+// Returns:
+//
+//	Layer
+func ConvertTuiLayer(geojson map[string]interface{}) (Layer, error) {
 	// geojsonがnilの場合はエラーを返す
 	if geojson == nil {
-		return TuiGeometry{}, errors.New("geojson is nil")
+		return Layer{
+			Valid: false,
+		}, errors.New("geojson is nil")
 	}
 
 	// featuresの取得
 	featuresInterface, ok := geojson["features"]
 	if !ok {
-		return TuiGeometry{}, errors.New("features not found in GeoJSON")
+		return Layer{
+			Valid: false,
+		}, errors.New("features not found in GeoJSON")
 	}
 	// 型アサーション
 	features, ok := featuresInterface.([]interface{})
 	if !ok {
-		return TuiGeometry{}, errors.New("features is not a slice")
+		return Layer{
+			Valid: false,
+		}, errors.New("features is not a slice")
 	}
 	// featuresをmap[string]interface{}のスライスに変換
 	var featureMaps []map[string]interface{}
@@ -157,11 +219,13 @@ func ConvertTuiBytes(geojson map[string]interface{}, width, height int) (TuiGeom
 	// バウンディングボックスの計算
 	bound := calculateBoundingBox(featureMaps)
 	if math.IsInf(bound.LonMin, 0) || math.IsInf(bound.LatMin, 0) {
-		return TuiGeometry{}, errors.New("bounding box could not be calculated")
+		return Layer{
+			Valid: false,
+		}, errors.New("bounding box could not be calculated")
 	}
 
 	// 各featureの処理
-	var polygons []Polygon
+	var layerFeatures []CachedFeature
 	for _, feature := range featureMaps {
 		// geometryの取得
 		// 型アサーションしてmap[string]interface{}に変換
@@ -185,34 +249,23 @@ func ConvertTuiBytes(geojson map[string]interface{}, width, height int) (TuiGeom
 		}
 
 		rings := extractCoordinates(geometry)
-		var tuiRings [][][2]int
-		for _, ring := range rings {
-			var tuiRing [][2]int
-			for _, coord := range ring {
-				lon, lat := coord[0], coord[1]
-				tuiCoord := geometoryToTui(lon, lat, bound, width, height)
-				tuiRing = append(tuiRing, tuiCoord)
-			}
-			tuiRings = append(tuiRings, tuiRing)
-		}
 
 		name, ok := properties["name"]
 		if !ok {
 			name = "unknown"
 		}
 
-		polygon := Polygon{
+		cachedFeature := CachedFeature{
 			Name:       name.(string),
 			Properties: properties,
-			Rings:      tuiRings,
+			Rings:      rings,
 		}
-		polygons = append(polygons, polygon)
+		layerFeatures = append(layerFeatures, cachedFeature)
 	}
 
-	return TuiGeometry{
+	return Layer{
 		Bounds:   *bound,
-		Width:    width,
-		Height:   height,
-		Polygons: polygons,
+		Features: layerFeatures,
+		Valid:    true,
 	}, nil
 }

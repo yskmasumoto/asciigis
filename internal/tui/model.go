@@ -31,6 +31,10 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			MarginTop(1)
+
+	cacheInvalid = geo.Layer{
+		Valid: false,
+	}
 )
 
 const (
@@ -40,7 +44,7 @@ const (
 
 type geometryLoadedMsg struct {
 	path     string
-	data     map[string]interface{}
+	data     geo.Layer
 	geometry geo.TuiGeometry
 	err      error
 }
@@ -56,7 +60,7 @@ type Options struct {
 type model struct {
 	geoPath        string
 	inputPath      string
-	geoData        map[string]interface{}
+	geoData        geo.Layer
 	editing        bool
 	geometry       geo.TuiGeometry
 	width          int
@@ -168,13 +172,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.geoPath = p
 				m.inputPath = p
-				m.geoData = nil
+				m.geoData = cacheInvalid
 				m.editing = false
 				m.loading = true
 				m.err = nil
 				m.geometry = geo.TuiGeometry{}
 				if m.ready {
-					return m, loadGeometryCmd(m.geoPath, nil, m.mapWidth, m.mapHeight)
+					return m, loadGeometryCmd(m.geoPath, cacheInvalid, m.mapWidth, m.mapHeight)
 				}
 				return m, nil
 			case "backspace", "ctrl+h":
@@ -198,13 +202,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if m.ready && strings.TrimSpace(m.geoPath) != "" {
 				m.loading = true
-				m.geoData = nil // Clear cached data to force reload.
-				return m, loadGeometryCmd(m.geoPath, nil, m.mapWidth, m.mapHeight)
+				m.geoData = cacheInvalid // Clear cached data to force reload.
+				return m, loadGeometryCmd(m.geoPath, cacheInvalid, m.mapWidth, m.mapHeight)
 			}
 		case "c":
 			m.geoPath = ""
 			m.inputPath = ""
-			m.geoData = nil
+			m.geoData = cacheInvalid
 			m.geometry = geo.TuiGeometry{}
 			m.err = nil
 			m.loading = false
@@ -326,7 +330,7 @@ func renderCanvas(geometry geo.TuiGeometry, loading bool, loadErr error) string 
 	return strings.Join(lines, "\n")
 }
 
-func loadGeometryCmd(path string, cached map[string]interface{}, width, height int) tea.Cmd {
+func loadGeometryCmd(path string, cached geo.Layer, width, height int) tea.Cmd {
 	return func() tea.Msg {
 		p := strings.TrimSpace(path)
 		if p == "" {
@@ -334,12 +338,12 @@ func loadGeometryCmd(path string, cached map[string]interface{}, width, height i
 		}
 
 		data := cached
-		if data == nil {
+		if !cached.Valid {
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return geometryLoadedMsg{path: path, err: fmt.Errorf("read file: %w", err)}
 			}
-			data, err = geo.BytesToGeoJSON(b)
+			data, err = geo.BytesToLayer(b)
 			if err != nil {
 				return geometryLoadedMsg{path: path, err: fmt.Errorf("parse JSON: %w", err)}
 			}
