@@ -255,8 +255,13 @@ func ConvertTuiLayer(geojson map[string]interface{}) (Layer, error) {
 			name = "unknown"
 		}
 
+		nameString, ok := name.(string)
+		if !ok {
+			nameString = "unknown"
+		}
+
 		cachedFeature := CachedFeature{
-			Name:       name.(string),
+			Name:       nameString,
 			Properties: properties,
 			Rings:      rings,
 		}
